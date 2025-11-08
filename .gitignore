@@ -1,0 +1,12 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*.pyo
+*$py.class
+
+# pytest cache
+.pytest_cache/
+
+# VSCode settings
+.vscode/
+*.code-workspace
