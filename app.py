@@ -93,47 +93,30 @@ def classify_image():
 
     img = Image.open(file.stream).convert('RGB')
 
-    match SELECTED_MODEL:
-        case 'KNN':
-            try:
-                knn_model, feature_extractor = load_knn_model() 
-
-                if knn_model is not None and feature_extractor is not None:
-                    try:
-                        predicted = predict_image(img, knn_model, feature_extractor)
-                        return jsonify({"mensagem": "Predição realizada", "predicao": predicted, "status": 200}), 200
-                    except Exception as e:
-                        return jsonify({"mensagem": "Erro ao processar a imagem para predição", "erro": str(e), "status": 500}), 500
-            except Exception as e:
-                return jsonify({"mensagem": "Erro ao carregar o modelo", "erro": str(e), "status": 500}), 500
-        case 'CNN':
-            cnn = load_cnn_model()
-            if cnn is not None:
-                try:
-                    # Pré-processamento conforme classificar_m1.py (resize + /255.0)
-                    processed_img = preprocess_image_for_cnn(img)
-                    predicted = cnn.predict(processed_img)
-
-                    # Se o modelo retorna uma probabilidade (sigmoid) -> comparar com threshold 0.5
-                    pred_np = np.asarray(predicted)
-                    # caso seja probabilidade escalar ou shape (1,1)
-                    if pred_np.size == 1 or (pred_np.ndim == 2 and pred_np.shape[1] == 1):
-                        prob = float(np.squeeze(pred_np))
-                        # Seguir a lógica de classificar_m1.py: prob > 0.5 => "com cinto"
-                        predicted_label = CLASS_MAP.get(0.0) if prob > 0.5 else CLASS_MAP.get(1.0)
-                    # caso seja softmax com N classes (por exemplo (1,2)) -> usar argmax
-                    elif pred_np.ndim == 2 and pred_np.shape[1] > 1:
-                        class_idx = float(np.argmax(pred_np, axis=1)[0])
-                        predicted_label = CLASS_MAP.get(class_idx, "CLASSE DESCONHECIDA")
-                    else:
-                        # fallback genérico
-                        class_idx = float(np.round(np.squeeze(pred_np)))
-                        predicted_label = CLASS_MAP.get(class_idx, "CLASSE DESCONHECIDA")
-                    return jsonify({"mensagem": "Predição realizada", "predicao": predicted_label, "status": 200}), 200
-                except Exception as e:
-                    return jsonify({"mensagem": "Erro ao processar a imagem para predição", "erro": str(e), "status": 500}), 500
-        case _:
-            return jsonify({"mensagem": "Modelo não suportado", "status": 400}), 400
+    cnn = load_cnn_model()
+    if cnn is not None:
+        try:
+            # Pré-processamento conforme classificar_m1.py (resize + /255.0)
+            processed_img = preprocess_image_for_cnn(img)
+            predicted = cnn.predict(processed_img)
+            # Se o modelo retorna uma probabilidade (sigmoid) -> comparar com threshold 0.5
+            pred_np = np.asarray(predicted)
+            # caso seja probabilidade escalar ou shape (1,1)
+            if pred_np.size == 1 or (pred_np.ndim == 2 and pred_np.shape[1] == 1):
+                prob = float(np.squeeze(pred_np))
+                # Seguir a lógica de classificar_m1.py: prob > 0.5 => "com cinto"
+                predicted_label = CLASS_MAP.get(0.0) if prob > 0.5 else CLASS_MAP.get(1.0)
+            # caso seja softmax com N classes (por exemplo (1,2)) -> usar argmax
+            elif pred_np.ndim == 2 and pred_np.shape[1] > 1:
+                class_idx = float(np.argmax(pred_np, axis=1)[0])
+                predicted_label = CLASS_MAP.get(class_idx, "CLASSE DESCONHECIDA")
+            else:
+                # fallback genérico
+                class_idx = float(np.round(np.squeeze(pred_np)))
+                predicted_label = CLASS_MAP.get(class_idx, "CLASSE DESCONHECIDA")
+            return jsonify({"mensagem": "Predição realizada", "predicao": predicted_label, "status": 200}), 200
+        except Exception as e:
+            return jsonify({"mensagem": "Erro ao processar a imagem para predição", "erro": str(e), "status": 500}), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
