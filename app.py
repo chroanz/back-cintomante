@@ -9,15 +9,16 @@ import tensorflow as tf
 from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing import image
+import gdown  # <--- new import
 
 app = Flask(__name__)
 
-SELECTED_MODEL = 'CNN' # KNN, CNN, CNNRF, YOLO, RL
+SELECTED_MODEL = 'CNN'  # KNN, CNN, CNNRF, YOLO, RL
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, 'models')
 EXTRACTOR_PATH = os.path.join(MODEL_DIR, 'mobilenetv2_extractor.h5')
 KNN_PATH = os.path.join(MODEL_DIR, 'knn_model.joblib')
-CNN_PATH = os.path.join(MODEL_DIR, 'modelo_cinto_otimizado.keras')  
+CNN_PATH = os.path.join(MODEL_DIR, 'modelo_cinto_otimizado.keras')
 IMAGE_SIZE = (150, 150)
 # Mapear classes para labels legíveis pela API
 CLASS_MAP = {0.0: "com cinto", 1.0: "sem cinto"}
@@ -27,6 +28,19 @@ knn = None
 cnn = None
 
 def load_cnn_model():
+    """Load CNN model, downloading from Google Drive if needed."""
+    FILE_ID = "1DWJEK3o0xAdETxYExLxBGON4cJAleMlj"
+    url = f"https://drive.google.com/uc?id={FILE_ID}"
+
+    # Ensure models directory exists
+    os.makedirs(MODEL_DIR, exist_ok=True)
+
+    # Download if file does not exist
+    if not os.path.exists(CNN_PATH):
+        print(f"Downloading CNN model from Google Drive to {CNN_PATH}...")
+        gdown.download(url, CNN_PATH, quiet=False)
+
+    # Load the model
     cnn_model = load_model(CNN_PATH)
     return cnn_model
 
