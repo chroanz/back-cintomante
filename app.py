@@ -8,6 +8,7 @@ from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing import image
 import gdown
+import zipfile
 
 # Logging configuration
 logger = logging.getLogger("seatbelt_api")
@@ -43,39 +44,87 @@ def load_cnn_model():
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     logger.info("Verificando existência do arquivo de modelo em: %s", CNN_PATH)
+    # Caso exista um zip do modelo no repositório (ex: modelo_cinto_otimizado.keras.zip
+    # ou modelo_cinto_otimizado.zip) extraímos automaticamente para o diretório de modelos.
+    possible_zip_names = [CNN_PATH + '.zip',
+                          os.path.join(MODEL_DIR, os.path.basename(CNN_PATH) + '.zip'),
+                          os.path.join(MODEL_DIR, os.path.splitext(os.path.basename(CNN_PATH))[0] + '.zip')]
+    for zip_path in possible_zip_names:
+        if os.path.exists(zip_path):
+            logger.info("Arquivo zip do modelo encontrado: %s. Extraindo...", zip_path)
+            try:
+                with zipfile.ZipFile(zip_path, 'r') as z:
+                    z.extractall(MODEL_DIR)
+                logger.info("Extração concluída: %s", zip_path)
+            except Exception:
+                logger.exception("Falha ao extrair o arquivo zip do modelo: %s", zip_path)
 
-    if not os.path.exists(CNN_PATH):
-        logger.info("Arquivo do modelo não encontrado. Iniciando download de %s para %s", url, CNN_PATH)
+    # Tentar carregar localmente se o arquivo já existir no repo/slug
+    if os.path.exists(CNN_PATH):
         try:
-            result = gdown.download(url, CNN_PATH, quiet=False)
-            if result:
-                logger.info("Download concluído: %s", CNN_PATH)
-            else:
-                logger.warning("gdown.download retornou None — verifique permissões/ID do arquivo.")
+            logger.info("Carregando modelo CNN a partir de arquivo no disco: %s", CNN_PATH)
+            cnn_model = load_model(CNN_PATH)
+            logger.info("Modelo CNN carregado com sucesso a partir do disco.")
+            return cnn_model
         except Exception:
-            logger.exception("Falha ao baixar o modelo do Google Drive")
+            logger.exception("Falha ao carregar o modelo a partir do arquivo no disco: %s", CNN_PATH)
 
+    # Caso contrário, baixe para um diretório temporário, carregue em memória e remova os arquivos temporários.
+    logger.info("Arquivo do modelo não encontrado localmente. Tentando download temporário de: %s", url)
     try:
-        logger.info("Carregando modelo CNN a partir de: %s", CNN_PATH)
-        cnn_model = load_model(CNN_PATH)
-        logger.info("Modelo CNN carregado com sucesso.")
-        return cnn_model
+        with tempfile.TemporaryDirectory() as td:
+            temp_path = os.path.join(td, os.path.basename(CNN_PATH))
+            result = gdown.download(url, temp_path, quiet=False)
+            if not result or not os.path.exists(temp_path):
+                logger.warning("gdown.download falhou ou não criou o arquivo esperado: %s", temp_path)
+            else:
+                logger.info("Download temporário concluído: %s", temp_path)
+
+                # Se for zip, extraia em tempdir
+                if zipfile.is_zipfile(temp_path) or temp_path.lower().endswith('.zip'):
+                    try:
+                        with zipfile.ZipFile(temp_path, 'r') as z:
+                            z.extractall(td)
+                        logger.info("Zip extraído em tempdir: %s", td)
+                    except Exception:
+                        logger.exception("Falha ao extrair zip temporário: %s", temp_path)
+
+                # Procurar por um arquivo .keras ou um diretório SavedModel dentro do tempdir
+                candidate = None
+                for root, _, files in os.walk(td):
+                    for f in files:
+                        if f.lower().endswith('.keras'):
+                            candidate = os.path.join(root, f)
+                            break
+                    if candidate:
+                        break
+
+                saved_model_dir = None
+                for name in os.listdir(td):
+                    p = os.path.join(td, name)
+                    if os.path.isdir(p) and os.path.exists(os.path.join(p, 'saved_model.pb')):
+                        saved_model_dir = p
+                        break
+
+                load_target = saved_model_dir or candidate or temp_path
+                try:
+                    logger.info("Carregando modelo a partir de recurso temporário: %s", load_target)
+                    cnn_model = load_model(load_target)
+                    logger.info("Modelo carregado em memória com sucesso (temporário).")
+                    return cnn_model
+                except Exception:
+                    logger.exception("Falha ao carregar o modelo a partir do recurso temporário: %s", load_target)
     except Exception:
-        logger.exception("Erro ao carregar o modelo CNN")
-        raise
+        logger.exception("Falha durante download/carregamento temporário do modelo")
+
+    # Se tudo falhar, levantar exceção para ser tratada pelo chamador
+    raise FileNotFoundError(f"Não foi possível obter um modelo válido a partir de {CNN_PATH} ou {url}")
 
 try:
     cnn = load_cnn_model()
 except Exception:
     logger.error("Não foi possível carregar o modelo CNN na inicialização. A API continuará rodando, mas predições falharão.", exc_info=True)
     cnn = None
-
-def preprocess_image(img):
-    img = img.resize(IMAGE_SIZE)
-    img_array = image.img_to_array(img)
-    img_array = img_array / 255.0  # Normaliza os pixels
-    img_array = np.expand_dims(img_array, axis=0)
-    return preprocess_input(img_array)
 
 def preprocess_image_for_cnn(img):
     img = img.resize(IMAGE_SIZE)
