@@ -1,12 +1,9 @@
-from re import match
-from flask import Flask, make_response, request, jsonify
-from io import BytesIO
+from flask import Flask, request, jsonify
 import os
 from PIL import Image
 import numpy as np
 import joblib
-import tensorflow as tf
-from tensorflow.keras.models import load_model, Model
+from tensorflow.keras.models import load_model
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input
 from tensorflow.keras.preprocessing import image
 import gdown  # <--- new import
