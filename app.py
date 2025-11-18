@@ -2,6 +2,7 @@ from flask import Flask, request, jsonify
 import os
 import sys
 import logging
+import tempfile
 from PIL import Image
 import numpy as np
 from tensorflow.keras.models import load_model
@@ -39,8 +40,8 @@ knn = None
 cnn = None
 
 def load_cnn_model():
-    FILE_ID = "1DWJEK3o0xAdETxYExLxBGON4cJAleMlj"
-    url = f"https://drive.google.com/uc?id={FILE_ID}"
+    FILE_ID = os.getenv("MODEL_FILE_ID", "1DWJEK3o0xAdETxYExLxBGON4cJAleMlj")
+    url = os.getenv("MODEL_URL", f"https://drive.google.com/uc?id={FILE_ID}")
 
     os.makedirs(MODEL_DIR, exist_ok=True)
     logger.info("Verificando existência do arquivo de modelo em: %s", CNN_PATH)
