@@ -8,7 +8,7 @@ import numpy as np
 from tensorflow.keras.models import load_model, Model
 from tensorflow.keras.applications.mobilenet_v2 import preprocess_input as mobilenet_preprocess_input
 from tensorflow.keras.preprocessing import image
-import joblib
+import joblib 
 import gdown
 import zipfile
 
@@ -29,8 +29,8 @@ app.logger.setLevel(logger.level)
 SELECTED_MODEL = 'KNN'  
 BASE_DIR = os.path.dirname(__file__)
 MODEL_DIR = os.path.join(BASE_DIR, 'models')
-EXTRACTOR_PATH = os.path.join(MODEL_DIR, 'mobilenetv2_extractor.h5') # O seu extrator MobileNetV2
-KNN_PATH = os.path.join(MODEL_DIR, 'knn_model.joblib') # O seu modelo KNN
+EXTRACTOR_PATH = os.path.join(MODEL_DIR, 'mobilenetv2_extractor.h5') 
+KNN_PATH = os.path.join(MODEL_DIR, 'knn_model.joblib') 
 CNN_PATH = os.path.join(MODEL_DIR, 'modelo_cinto_otimizado.keras') 
 IMAGE_SIZE = (150, 150)
 # Mapear classes para labels legíveis pela API
@@ -40,39 +40,104 @@ extractor = None
 knn = None
 cnn = None 
 
+KNN_FILE_ID = os.getenv("KNN_FILE_ID", "1TYZYKLoCS2D8Ks0hK-_R_p28RCuTQO0N") 
+EXTRACTOR_FILE_ID = os.getenv("EXTRACTOR_FILE_ID", "1zyDpaJSwUvvj3b8GZ5tvt-4xIhr_8VS2")
+
+def load_model_with_fallback(file_path, file_id, loader_func, logger):
+    url = f"https://drive.google.com/uc?id={file_id}"
+    model = None
+    
+    # Tentar carregar localmente se o arquivo já existir no repo/slug
+    if os.path.exists(file_path):
+        try:
+            logger.info("Carregando modelo a partir de arquivo no disco: %s", file_path)
+            model = loader_func(file_path)
+            logger.info("Modelo carregado com sucesso a partir do disco.")
+            return model
+        except Exception:
+            logger.exception(f"Falha ao carregar o modelo a partir do arquivo no disco: {file_path}. Tentando download...")
+
+    # Caso contrário, baixe para um diretório temporário, carregue em memória e remova os arquivos temporários.
+    if file_id and file_id not in ["ID_PLACEHOLDER_KNN_JOBLIB", "ID_PLACEHOLDER_EXTRACTOR_H5", None]:
+        logger.info("Arquivo do modelo não encontrado localmente. Tentando download temporário de: %s", url)
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                temp_path = os.path.join(td, os.path.basename(file_path))
+                
+                result = gdown.download(url, temp_path, quiet=False)
+                if not result or not os.path.exists(temp_path):
+                    logger.warning("gdown.download falhou ou não criou o arquivo esperado: %s", temp_path)
+                    return None
+                
+                logger.info("Download temporário concluído: %s", temp_path)
+
+                load_target = temp_path
+                
+                # Caso exista um zip, extraímos automaticamente
+                if zipfile.is_zipfile(temp_path) or temp_path.lower().endswith('.zip'):
+                    try:
+                        with zipfile.ZipFile(temp_path, 'r') as z:
+                            z.extractall(td)
+                        logger.info("Zip extraído em tempdir: %s", td)
+                        
+                        candidate = None
+                        for root, _, files in os.walk(td):
+                            for f in files:
+                                if f == os.path.basename(file_path) or f.lower().endswith(('.keras', '.h5', '.joblib', '.pkl')):
+                                    candidate = os.path.join(root, f)
+                                    break
+                            if candidate:
+                                break
+                        load_target = candidate if candidate else temp_path
+
+                    except Exception:
+                        logger.exception("Falha ao extrair zip temporário: %s", temp_path)
+
+                try:
+                    logger.info("Carregando modelo a partir de recurso temporário: %s", load_target)
+                    model = loader_func(load_target)
+                    logger.info("Modelo carregado em memória com sucesso (temporário).")
+                    return model
+                except Exception:
+                    logger.exception(f"Falha ao carregar o modelo a partir do recurso temporário: {load_target}")
+        except Exception:
+            logger.exception("Falha durante download/carregamento temporário do modelo")
+    
+    return None
+
 def load_knn_mobilenet_models():
-    logger.info("Carregando o Extrator de Características (MobileNetV2) a partir de: %s", EXTRACTOR_PATH)
-    try:
-        if os.path.exists(EXTRACTOR_PATH):
-            extractor_model = load_model(EXTRACTOR_PATH, compile=False)
-            logger.info("Extrator carregado com sucesso a partir do disco.")
-        else:
-            raise FileNotFoundError(f"Arquivo do extrator não encontrado: {EXTRACTOR_PATH}")
-    except Exception:
-        logger.exception("Falha ao carregar o Extrator MobileNetV2.")
-        extractor_model = None
+    os.makedirs(MODEL_DIR, exist_ok=True)
+    
+    def load_keras_model(path):
+        return load_model(path, compile=False)
 
-    logger.info("Carregando o Classificador KNN a partir de: %s", KNN_PATH)
-    try:
-        if os.path.exists(KNN_PATH):
-            knn_model = joblib.load(KNN_PATH)
-            logger.info("Modelo KNN carregado com sucesso.")
-        else:
-            raise FileNotFoundError(f"Arquivo do KNN não encontrado: {KNN_PATH}")
-    except Exception:
-        logger.exception("Falha ao carregar o modelo KNN.")
-        knn_model = None
+    def load_joblib_model(path):
+        return joblib.load(path)
 
+    extractor_model = load_model_with_fallback(
+        file_path=EXTRACTOR_PATH,
+        file_id=EXTRACTOR_FILE_ID,
+        loader_func=load_keras_model,
+        logger=logger
+    )
+    
+    knn_model = load_model_with_fallback(
+        file_path=KNN_PATH,
+        file_id=KNN_FILE_ID,
+        loader_func=load_joblib_model,
+        logger=logger
+    )
+    
     if extractor_model is None or knn_model is None:
-        raise FileNotFoundError("Não foi possível carregar ambos os modelos necessários (Extrator e KNN).")
-
+        raise FileNotFoundError("Não foi possível carregar ou baixar ambos os modelos necessários (Extrator MobileNetV2 e KNN Classifier).")
+        
     return knn_model, extractor_model
 
 try:
     knn, extractor = load_knn_mobilenet_models()
     logger.info("Sistema de predição (KNN + MobileNetV2) carregado com sucesso.")
 except Exception:
-    logger.error("Não foi possível carregar os modelos KNN/MobileNetV2 na inicialização.", exc_info=True)
+    logger.error("Não foi possível carregar os modelos KNN/MobileNetV2 na inicialização. A API continuará rodando, mas predições falharão.", exc_info=True)
     knn = None
     extractor = None
 
@@ -86,7 +151,7 @@ def preprocess_image_for_knn(img):
 def check():
     logger.debug("GET /api chamada")
     model_status = "ok" if knn is not None and extractor is not None else "erro de carregamento"
-    return jsonify({"mensagem": "API online (GET)", "status": 200, "modelo": SELECTED_MODEL, "status_modelo": model_status})
+    return jsonify({"mensagem": "API online (GET)", "status": 200, "modelo": SELECTED_MODEL, "status_modelo": model_status}), 200
 
 @app.route('/api', methods=['POST'])
 def classify_image():
