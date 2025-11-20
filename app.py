@@ -1,4 +1,5 @@
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 import os
 import sys
 import logging
@@ -22,6 +23,8 @@ if not logger.handlers:
     logger.addHandler(handler)
 
 app = Flask(__name__)
+CORS(app, origins=["https://lucas-d-barbosa.github.io"])
+
 # integrate flask logger handlers (optional)
 app.logger.handlers = logger.handlers
 app.logger.setLevel(logger.level)
